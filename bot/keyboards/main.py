@@ -18,9 +18,6 @@ class MainKeyboards(KeyboardOperations):
             4: [
                 ("Организации", "orgs:info"),
                 ("Терминалы", "terminals:list")
-            ],
-            5: [
-                ("Настройки", "settings")
             ]
         }
         return await self.create_keyboard(buttons=buttons, architecture=True)

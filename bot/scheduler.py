@@ -4,7 +4,6 @@ from datetime import datetime, time
 from aiogram import Bot
 from config import settings
 from services.analytics import AnalyticsService
-from db.repo import SettingsRepo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,20 +19,20 @@ class ReportScheduler:
     async def send_daily_report(self):
         """Отправка ежедневного отчёта"""
         try:
-            db_settings = await SettingsRepo.get_settings()
-            
             today = datetime.now()
             today_metrics = await self.analytics_service.get_period_metrics(
                 today.replace(hour=0, minute=0, second=0, microsecond=0),
                 today
             )
 
-            rolling_avg = await self.analytics_service.get_rolling_average(db_settings.rolling_days)
+            rolling_avg = await self.analytics_service.get_rolling_average(
+                settings.DEFAULT_ROLLING_DAYS
+            )
             today_revenue = today_metrics["revenue"]
 
             if rolling_avg > 0:
                 change_pct = ((today_revenue - rolling_avg) / rolling_avg) * 100
-                threshold = db_settings.alert_threshold_pct
+                threshold = settings.DEFAULT_ALERT_THRESHOLD_PCT
 
                 if change_pct <= -threshold:
                     emoji = "🔴"
@@ -49,7 +48,8 @@ class ReportScheduler:
                     f"🟢 Выручка: {today_revenue:,.0f} ₽\n"
                     f"🟢 Заказов: {today_metrics['orders']:,.0f}\n"
                     f"🟢 Средний чек: {today_metrics['average_check']:,.0f} ₽\n\n"
-                    f"Средняя выручка за последние {db_settings.rolling_days} дней: {rolling_avg:,.0f} ₽\n"
+                    f"Средняя выручка за последние "
+                    f"{settings.DEFAULT_ROLLING_DAYS} дней: {rolling_avg:,.0f} ₽\n"
                     f"Изменение к среднему: {change_pct:+.1f}%"
                 )
 
@@ -75,28 +75,28 @@ class ReportScheduler:
             try:
                 await self.bot.send_message(
                     chat_id=settings.ADMIN_TG_ID,
-                    text=f"❌ Ошибка при формировании ежедневного отчёта: {str(e)}"
+                    text=f"❌ Ошибка при формировании ежедневного отчёта: "
+                    f"{str(e)}"
                 )
-            except:
+            except Exception:
                 pass
 
     async def _scheduler_loop(self):
-        """Фоновая задача для проверки времени и отправки отчётов"""
+        """Фоновая задача для проверки времени и отправки отчётов в 23:00"""
         last_sent_date = None
+        report_time = time(23, 0)  # 23:00
         
         while self._running:
             try:
-                db_settings = await SettingsRepo.get_settings()
-                report_hour, report_minute = map(int, db_settings.report_time.split(":"))
-                report_time = time(report_hour, report_minute)
-                
                 now = datetime.now()
                 current_time = now.time()
                 current_date = now.date()
                 
-                # Проверяем, наступило ли время отправки и не отправляли ли уже сегодня
-                if (current_time >= report_time and 
-                    (last_sent_date is None or last_sent_date < current_date)):
+                # Проверяем, наступило ли время отправки
+                # и не отправляли ли уже сегодня
+                if (current_time >= report_time and
+                        (last_sent_date is None or
+                         last_sent_date < current_date)):
                     await self.send_daily_report()
                     last_sent_date = current_date
                     logger.info(f"Daily report sent at {now.strftime('%Y-%m-%d %H:%M:%S')}")

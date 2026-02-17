@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from iiko.client import IikoClient
-from db.repo import SettingsRepo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,19 +30,32 @@ class AnalyticsService:
         """Проверяет, действителен ли кэш"""
         return (datetime.now() - cache_time).total_seconds() < self._cache_ttl
 
-    async def get_metrics(self, date_from: str, date_to: str, org_ids: Optional[List[str]] = None, use_cache: bool = True) -> Dict[str, Any]:
+    async def get_metrics(
+        self,
+        date_from: str,
+        date_to: str,
+        org_ids: Optional[List[str]] = None,
+        use_cache: bool = True
+    ) -> Dict[str, Any]:
         """
         Получение метрик по организациям.
         Если org_ids=None - агрегирует данные по всем организациям.
         Если org_ids указан - получает метрики только по указанным организациям.
         Использует кэширование для ускорения повторных запросов.
         """
-        cache_key = f"{date_from}_{date_to}_{str(org_ids) if org_ids else 'all'}"
-        
+        cache_key = (
+            f"{date_from}_{date_to}_"
+            f"{str(org_ids) if org_ids else 'all'}"
+        )
+
         if use_cache and cache_key in self._cache:
             cached_data, cache_time = self._cache[cache_key]
             if self._is_cache_valid(cache_time):
-                logger.debug(f"Using cached metrics for {date_from} - {date_to} (orgs: {len(org_ids) if org_ids else 'all'})")
+                orgs_info = len(org_ids) if org_ids else 'all'
+                logger.debug(
+                    f"Using cached metrics for {date_from} - {date_to} "
+                    f"(orgs: {orgs_info})"
+                )
                 return cached_data
             else:
                 del self._cache[cache_key]
@@ -88,11 +100,19 @@ class AnalyticsService:
             return f"Все организации ({len(orgs)})"
         return "Все организации"
 
-    async def get_period_metrics(self, date_from: datetime, date_to: datetime, org_ids: Optional[List[str]] = None, use_cache: bool = True) -> Dict[str, Any]:
+    async def get_period_metrics(
+        self,
+        date_from: datetime,
+        date_to: datetime,
+        org_ids: Optional[List[str]] = None,
+        use_cache: bool = True
+    ) -> Dict[str, Any]:
         date_from_str = date_from.strftime("%Y-%m-%d")
         date_to_str = date_to.strftime("%Y-%m-%d")
         
-        metrics = await self.get_metrics(date_from_str, date_to_str, org_ids=org_ids, use_cache=use_cache)
+        metrics = await self.get_metrics(
+            date_from_str, date_to_str, org_ids=org_ids, use_cache=use_cache
+        )
         
         if org_ids and len(org_ids) == 1:
             orgs = await self.get_all_organizations()
@@ -111,7 +131,11 @@ class AnalyticsService:
             **metrics
         }
 
-    async def compare_with_yesterday(self, today_metrics: Dict[str, Any], org_ids: Optional[List[str]] = None) -> Optional[float]:
+    async def compare_with_yesterday(
+        self,
+        today_metrics: Dict[str, Any],
+        org_ids: Optional[List[str]] = None
+    ) -> Optional[float]:
         """Сравнение с вчерашним днём"""
         try:
             today = datetime.now()
@@ -172,7 +196,11 @@ class AnalyticsService:
             return result
         except Exception as e:
             logger.error(f"Failed to compare periods: {e}")
-            return {"revenue_change": None, "orders_change": None, "avg_check_change": None}
+            return {
+                "revenue_change": None,
+                "orders_change": None,
+                "avg_check_change": None
+            }
 
     async def get_rolling_average(self, days: int) -> float:
         today = datetime.now()
@@ -195,7 +223,10 @@ class AnalyticsService:
         date_from_str = date_from.strftime("%Y-%m-%d")
         date_to_str = date_to.strftime("%Y-%m-%d")
         
-        cache_key = f"detailed_foodcost_{date_from_str}_{date_to_str}_{str(org_ids) if org_ids else 'all'}"
+        cache_key = (
+            f"detailed_foodcost_{date_from_str}_{date_to_str}_"
+            f"{str(org_ids) if org_ids else 'all'}"
+        )
         
         if use_cache and cache_key in self._cache:
             cached_data, cache_time = self._cache[cache_key]

@@ -1,12 +1,15 @@
+import logging
+import traceback
 from datetime import datetime, timedelta
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from db.repo import SettingsRepo
-import logging
+
+from config import settings as app_settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,54 +50,6 @@ async def callback_back(callback: CallbackQuery, state: FSMContext, variables):
         "Выберите период для просмотра аналитики:",
         reply_markup=await variables.keyboards.main.menu()
     )
-
-
-@router.callback_query(F.data == "settings")
-async def callback_settings(callback: CallbackQuery, variables):
-    settings_obj = await SettingsRepo.get_settings()
-    text = (
-        f"⚙️ Настройки\n\n"
-        f"Порог алерта: {settings_obj.alert_threshold_pct}%\n"
-        f"Rolling days: {settings_obj.rolling_days}\n"
-        f"Время отчёта: {settings_obj.report_time}"
-    )
-    await callback.message.edit_text(text, reply_markup=await variables.keyboards.settings.menu())
-
-
-@router.callback_query(F.data.startswith("setting:"))
-async def callback_setting(callback: CallbackQuery, variables):
-    parts = callback.data.split(":")
-    setting_type = parts[1]
-    value = int(parts[2])
-
-    settings_obj = await SettingsRepo.get_settings()
-
-    if setting_type == "threshold":
-        new_value = settings_obj.alert_threshold_pct + value
-        await SettingsRepo.update_settings(alert_threshold_pct=new_value)
-        await callback.answer(f"Порог алерта: {new_value}%")
-    elif setting_type == "rolling":
-        new_value = max(1, settings_obj.rolling_days + value)
-        await SettingsRepo.update_settings(rolling_days=new_value)
-        await callback.answer(f"Rolling days: {new_value}")
-    elif setting_type == "time":
-        hour, minute = map(int, settings_obj.report_time.split(":"))
-        total_minutes = hour * 60 + minute + value
-        total_minutes = total_minutes % (24 * 60)
-        new_hour = total_minutes // 60
-        new_minute = total_minutes % 60
-        new_time = f"{new_hour:02d}:{new_minute:02d}"
-        await SettingsRepo.update_settings(report_time=new_time)
-        await callback.answer(f"Время отчёта: {new_time}")
-
-    settings_obj = await SettingsRepo.get_settings()
-    text = (
-        f"⚙️ Настройки\n\n"
-        f"Порог алерта: {settings_obj.alert_threshold_pct}%\n"
-        f"Rolling days: {settings_obj.rolling_days}\n"
-        f"Время отчёта: {settings_obj.report_time}"
-    )
-    await callback.message.edit_text(text, reply_markup=await variables.keyboards.settings.menu())
 
 
 @router.callback_query(F.data.startswith("orgs:"))
@@ -168,13 +123,17 @@ async def callback_period(callback: CallbackQuery, state: FSMContext, variables)
         await callback.answer("Загрузка данных...")
 
         org_ids = None
-        metrics = await variables.analytics.get_period_metrics(date_from, date_to, org_ids=org_ids)
+        metrics = await variables.analytics.get_period_metrics(
+            date_from, date_to, org_ids=org_ids
+        )
         
         comparison = None
         comparison_label = ""
         
         if period == "today":
-            change_pct = await variables.analytics.compare_with_yesterday(metrics, org_ids=org_ids)
+            change_pct = await variables.analytics.compare_with_yesterday(
+                metrics, org_ids=org_ids
+            )
             if change_pct is not None:
                 comparison = {"revenue_change": change_pct}
                 comparison_label = "к вчера"
@@ -208,8 +167,7 @@ async def callback_period(callback: CallbackQuery, state: FSMContext, variables)
         orders = metrics["orders"]
         avg_check = metrics["average_check"]
 
-        settings_obj = await SettingsRepo.get_settings()
-        threshold = settings_obj.alert_threshold_pct
+        threshold = app_settings.DEFAULT_ALERT_THRESHOLD_PCT
 
         revenue_emoji = "🟢"
         orders_emoji = "🟢"
@@ -245,8 +203,16 @@ async def callback_period(callback: CallbackQuery, state: FSMContext, variables)
         food_cost_pct = metrics.get("food_cost_pct", 0)
         food_cost_text = ""
         if food_cost > 0:
-            food_cost_emoji = "🟢" if food_cost_pct <= 30 else "🟡" if food_cost_pct <= 40 else "🔴"
-            food_cost_text = f"\n{food_cost_emoji} Фудкост: {food_cost:,.0f} ₽ ({food_cost_pct:.1f}%)"
+            if food_cost_pct <= 30:
+                food_cost_emoji = "🟢"
+            elif food_cost_pct <= 40:
+                food_cost_emoji = "🟡"
+            else:
+                food_cost_emoji = "🔴"
+            food_cost_text = (
+                f"\n{food_cost_emoji} Фудкост: {food_cost:,.0f} ₽ "
+                f"({food_cost_pct:.1f}%)"
+            )
         
         text = (
             f"{metrics['org_name']}\n\n"
@@ -261,7 +227,9 @@ async def callback_period(callback: CallbackQuery, state: FSMContext, variables)
         )
 
         try:
-            await callback.message.edit_text(text, reply_markup=await variables.keyboards.main.menu())
+            await callback.message.edit_text(
+                text, reply_markup=await variables.keyboards.main.menu()
+            )
         except TelegramBadRequest as e:
             if "message is not modified" in str(e).lower():
                 await callback.answer()
@@ -306,7 +274,10 @@ async def callback_terminals(callback: CallbackQuery, variables):
                 department_id = terminal.get("departmentId") or terminal.get("department") or ""
                 
                 text_parts.append(f"\n{i}. {name}")
-                text_parts.append(f"   ID: {terminal_id[:20]}..." if len(str(terminal_id)) > 20 else f"   ID: {terminal_id}")
+                if len(str(terminal_id)) > 20:
+                    text_parts.append(f"   ID: {terminal_id[:20]}...")
+                else:
+                    text_parts.append(f"   ID: {terminal_id}")
                 if address:
                     text_parts.append(f"   Адрес: {address[:50]}")
                 if department_id:
@@ -453,7 +424,12 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                         foodcost_pct = dish.get("foodcost_pct", 0)
                         orders = dish.get("orders", 0)
                         
-                        emoji = "🟢" if foodcost_pct <= 30 else "🟡" if foodcost_pct <= 40 else "🔴"
+                        if foodcost_pct <= 30:
+                            emoji = "🟢"
+                        elif foodcost_pct <= 40:
+                            emoji = "🟡"
+                        else:
+                            emoji = "🔴"
                         text_parts.append(
                             f"{i}. {emoji} {name}\n"
                             f"   Выручка: {revenue:,.0f} ₽ | Себестоимость: {cost:,.0f} ₽\n"
@@ -483,15 +459,23 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                     
                     valid_dishes.append(dish)
                 
-                red_zone_dishes = [d for d in valid_dishes if 40 < d.get("foodcost_pct", 0) <= 200]
-                
+                red_zone_dishes = [
+                    d for d in valid_dishes
+                    if 40 < d.get("foodcost_pct", 0) <= 200
+                ]
+
                 if red_zone_dishes:
-                    red_zone_dishes.sort(key=lambda x: x.get("foodcost_pct", 0), reverse=True)
+                    red_zone_dishes.sort(
+                        key=lambda x: x.get("foodcost_pct", 0), reverse=True
+                    )
                     worst_dishes = red_zone_dishes[:10]
                     title_suffix = " (красная зона)"
                 else:
                     dishes_sorted_by_foodcost = sorted(
-                        [d for d in valid_dishes if d.get("foodcost_pct", 0) <= 200],
+                        [
+                            d for d in valid_dishes
+                            if d.get("foodcost_pct", 0) <= 200
+                        ],
                         key=lambda x: x.get("foodcost_pct", 0),
                         reverse=True
                     )
@@ -505,7 +489,11 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                 ]
                 
                 if excluded_count > 0:
-                    text_parts.append(f"\n⚠️ Исключено {excluded_count} блюд с некорректными данными (фудкост > 200% или явные ошибки)\n")
+                    text_parts.append(
+                        f"\n⚠️ Исключено {excluded_count} блюд с "
+                        f"некорректными данными (фудкост > 200% или "
+                        f"явные ошибки)\n"
+                    )
                 
                 text_parts.append("\n")
                 
@@ -518,7 +506,12 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                         foodcost_pct = dish.get("foodcost_pct", 0)
                         orders = dish.get("orders", 0)
                         
-                        emoji = "🟢" if foodcost_pct <= 30 else "🟡" if foodcost_pct <= 40 else "🔴"
+                        if foodcost_pct <= 30:
+                            emoji = "🟢"
+                        elif foodcost_pct <= 40:
+                            emoji = "🟡"
+                        else:
+                            emoji = "🔴"
                         text_parts.append(
                             f"{i}. {emoji} {name}\n"
                             f"   Выручка: {revenue:,.0f} ₽ | Себестоимость: {cost:,.0f} ₽\n"
@@ -550,7 +543,12 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                         foodcost_pct = category.get("foodcost_pct", 0)
                         orders = category.get("orders", 0)
                         
-                        emoji = "🟢" if foodcost_pct <= 30 else "🟡" if foodcost_pct <= 40 else "🔴"
+                        if foodcost_pct <= 30:
+                            emoji = "🟢"
+                        elif foodcost_pct <= 40:
+                            emoji = "🟡"
+                        else:
+                            emoji = "🔴"
                         text_parts.append(
                             f"{i}. {emoji} {name}\n"
                             f"   Выручка: {revenue:,.0f} ₽ | Себестоимость: {cost:,.0f} ₽\n"
@@ -585,7 +583,12 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                         foodcost_pct = group.get("foodcost_pct", 0)
                         orders = group.get("orders", 0)
                         
-                        emoji = "🟢" if foodcost_pct <= 30 else "🟡" if foodcost_pct <= 40 else "🔴"
+                        if foodcost_pct <= 30:
+                            emoji = "🟢"
+                        elif foodcost_pct <= 40:
+                            emoji = "🟡"
+                        else:
+                            emoji = "🔴"
                         text_parts.append(
                             f"{i}. {emoji} {name}\n"
                             f"   Выручка: {revenue:,.0f} ₽ | Себестоимость: {cost:,.0f} ₽\n"
@@ -616,9 +619,10 @@ async def callback_foodcost(callback: CallbackQuery, variables):
                     raise
     except Exception as e:
         logger.error(f"Error getting food cost: {e}")
-        import traceback
         traceback.print_exc()
-        await callback.answer("Ошибка при получении данных о фудкосте", show_alert=True)
+        await callback.answer(
+            "Ошибка при получении данных о фудкосте", show_alert=True
+        )
 
 
 @router.message()

@@ -73,7 +73,7 @@ python main.py
 
 Опциональные параметры:
 - `ADMIN_TG_ID` - Telegram user_id администратора
-- `IIKO_BASE_URL` - базовый URL локального iiko API (по умолчанию: https://dreamteam-co.iiko.it/resto/api)
+- `IIKO_BASE_URL` - базовый URL локального iiko API
 - `DEFAULT_REPORT_TIME` - время ежедневного отчёта (формат HH:MM, по умолчанию: 23:00)
 - `DEFAULT_ALERT_THRESHOLD_PCT` - порог падения выручки для алерта в процентах (по умолчанию: 15)
 - `DEFAULT_ROLLING_DAYS` - количество дней для расчёта скользящего среднего (по умолчанию: 7)
